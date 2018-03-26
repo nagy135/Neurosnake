@@ -25,13 +25,15 @@ class Game(object):
         self.clock = pygame.time.Clock()
         self.body_parts = list()
         self.body_parts.append((START_X, START_Y))
-        self.orientation = (1,1)
+        self.body_parts.append((START_X+1, START_Y))
+        self.orientation = (1,0)
         self.time_step = 0.100
         self.last_time = time.time()
 
+        self.time_excuse = False
         self.food = (random.randint(0,19),random.randint(0,19))
         self.food_time = time.time()
-        self.food_wait_time = 5
+        self.food_wait_time = 15
 
 
     def get_fitness(self):
@@ -43,17 +45,28 @@ class Game(object):
         # pygame.draw.circle(self.gameDisplay, red, (int(self.ball_x),int(self.ball_y)), BALL_RADIUS)
         # pygame.draw.line(self.gameDisplay, black, (self.ball_x-pri, self.ball_y+pro),(self.ball_x, self.ball_y), 5)
         for body_part in self.body_parts:
-            pygame.draw.rect(self.gameDisplay, black, (STEP_SIZE*body_part[0], STEP_SIZE*body_part[1], STEP_SIZE, STEP_SIZE), 100)
-        pygame.draw.rect(self.gameDisplay, green, (self.food[0]*STEP_SIZE, self.food[1]*STEP_SIZE, STEP_SIZE, STEP_SIZE), 100)
+            # pygame.draw.rect(self.gameDisplay, black, (STEP_SIZE*body_part[0], STEP_SIZE*body_part[1], STEP_SIZE, STEP_SIZE), 100)
+            self.gameDisplay.fill(black, (STEP_SIZE*body_part[0], STEP_SIZE*body_part[1], STEP_SIZE, STEP_SIZE))
+
+        self.gameDisplay.fill(red, (self.food[0]*STEP_SIZE, self.food[1]*STEP_SIZE, STEP_SIZE, STEP_SIZE))
 
     def move(self):
-        for i in range(len(self.body_parts-2), 0):
-            #TODO
-            self.body_parts[i] = self.body_parts[i-1]
-        self.body.pop()
-        self.body_parts[0] = (body_part[0] + self.orientation[0], body_part[1] + self.orientation[1])
-        for i,body_part in enumerate(self.body_parts):
-            self.body_parts[i] = (body_part[0] + self.orientation[0], body_part[1] + self.orientation[1])
+        for i, body_part in enumerate(self.body_parts):
+            if i == 0:
+                continue
+            else:
+                self.body_parts[i] = self.body_parts[i-1]
+        self.body_parts[0] = (self.body_parts[0][0] + self.orientation[0], self.body_parts[0][1] + self.orientation[1])
+        self.check_food()
+
+    def check_food(self):
+        if self.body_parts[0][0] == self.food[0] and self.body_parts[0][1] == self.food[1]:
+            self.body_parts = [(self.food[0], self.food[1])] + self.body_parts
+            self.food = (random.randint(0,19),random.randint(0,19))
+
+
+    def move_part(self, i):
+        self.body_parts[i] = (self.body_parts[i] + self.orientation[0], self.body_parts[i] + self.orientation[1])
 
     def tick(self):
         now = time.time()
@@ -64,33 +77,38 @@ class Game(object):
 
     def move_time(self):
         time_now = time.time()
-        if abs(self.food_time - time_now > self.food_wait_time):
+        if abs(self.food_time - time_now) > self.food_wait_time or self.time_excuse:
             self.food_time = time_now
-            self.food = (random.randint(0,19),random.randint(0,19))
+            if not self.time_excuse:
+                self.food = (random.randint(0,19),random.randint(0,19))
+            self.time_excuse = False
 
     def start(self):
         end = False
         while not end:
             for event in pygame.event.get():
-                if event.type == pygame.KEYUP:
+                if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_LEFT:
                         if self.orientation[0] != 1:
                             self.orientation = (-1,0)
+                            self.time_excuse = True
                     if event.key == pygame.K_RIGHT:
                         if self.orientation[0] != -1:
-                            print('pressed it')
                             self.orientation = (1,0)
+                            self.time_excuse = True
                     if event.key == pygame.K_UP:
                         if self.orientation[1] != 1:
                             self.orientation = (0,-1)
+                            self.time_excuse = True
                     if event.key == pygame.K_DOWN:
                         if self.orientation[1] != -1:
                             self.orientation = (0,1)
+                            self.time_excuse = True
                     if event.key == pygame.K_q:
-                        pass
+                        end = True
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_LEFT:
-                            print('pressed it')
+                        pass
                     if event.key == pygame.K_RIGHT:
                         pass
                 if event.type == pygame.QUIT:
