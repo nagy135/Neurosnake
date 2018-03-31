@@ -1,4 +1,6 @@
+import copy
 import time
+import os
 import pygame
 import math
 import random
@@ -16,6 +18,8 @@ MAX_X = 19
 MAX_Y = 19
 STEP_SIZE = 50
 
+os.environ['SDL_VIDEO_WINDOW_POS'] = "{},{}".format(0,0)
+
 class Game(object):
 
     def __init__(self):
@@ -29,6 +33,7 @@ class Game(object):
         self.orientation = (1,0)
         self.time_step = 0.100
         self.last_time = time.time()
+        self.remembered_tail = None
 
         self.time_excuse = False
         self.food = (random.randint(0,19),random.randint(0,19))
@@ -51,22 +56,39 @@ class Game(object):
         self.gameDisplay.fill(red, (self.food[0]*STEP_SIZE, self.food[1]*STEP_SIZE, STEP_SIZE, STEP_SIZE))
 
     def move(self):
+        print(self.body_parts)
+        self.check_food()
+        if self.check_wall():
+            return
         for i, body_part in enumerate(self.body_parts):
             if i == 0:
                 continue
             else:
-                self.body_parts[i] = self.body_parts[i-1]
+                self.body_parts[i] = copy.deepcopy(self.body_parts[i-1])
         self.body_parts[0] = (self.body_parts[0][0] + self.orientation[0], self.body_parts[0][1] + self.orientation[1])
-        self.check_food()
+
+    def check_wall(self):
+        if self.body_parts[0][0] < 0 or self.body_parts[0][0] > MAX_X:
+            self.end = True
+            return True
+        if self.body_parts[0][1] < 0 or self.body_parts[0][1] > MAX_Y:
+            self.end = True
+            return True
+        return False
 
     def check_food(self):
+        if self.remembered_tail is not None and self.remembered_tail != self.body_parts[-1]:
+            print(self.remembered_tail)
+            print(self.body_parts[-1])
+            self.body_parts.append(self.remembered_tail)
+            self.body_parts = self.body_parts
+            self.remembered_tail = None
+            print(self.body_parts)
         if self.body_parts[0][0] == self.food[0] and self.body_parts[0][1] == self.food[1]:
-            self.body_parts = [(self.food[0], self.food[1])] + self.body_parts
+            print('appending')
             self.food = (random.randint(0,19),random.randint(0,19))
+            self.remembered_tail = self.body_parts[-1]
 
-
-    def move_part(self, i):
-        self.body_parts[i] = (self.body_parts[i] + self.orientation[0], self.body_parts[i] + self.orientation[1])
 
     def tick(self):
         now = time.time()
@@ -84,8 +106,8 @@ class Game(object):
             self.time_excuse = False
 
     def start(self):
-        end = False
-        while not end:
+        self.end = False
+        while not self.end:
             for event in pygame.event.get():
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_LEFT:
@@ -105,14 +127,14 @@ class Game(object):
                             self.orientation = (0,1)
                             self.time_excuse = True
                     if event.key == pygame.K_q:
-                        end = True
+                        self.end = True
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_LEFT:
                         pass
                     if event.key == pygame.K_RIGHT:
                         pass
                 if event.type == pygame.QUIT:
-                    end = True
+                    self.end = True
             self.tick()
             self.gameDisplay.fill(white)
             self.draw()
