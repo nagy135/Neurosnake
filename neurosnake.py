@@ -1,3 +1,4 @@
+import tensorflow as tf
 import copy
 import time
 import os
@@ -14,11 +15,15 @@ HEIGHT = 1000
 
 START_X = 10
 START_Y = 10
+BODY = [(2,2), (3,2), (4,2), (5,2),(6,2)]
+DX = 1
+DY = 0
 MAX_X = 19
 MAX_Y = 19
 STEP_SIZE = 50
+TIME_STEP_SIZE = 0.04
 
-os.environ['SDL_VIDEO_WINDOW_POS'] = "{},{}".format(0,0)
+# os.environ['SDL_VIDEO_WINDOW_POS'] = "{},{}".format(0,0)
 
 class Game(object):
 
@@ -27,22 +32,70 @@ class Game(object):
         self.gameDisplay = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption('NeuroSnake')
         self.clock = pygame.time.Clock()
-        self.body_parts = list()
-        self.body_parts.append((START_X, START_Y))
-        self.body_parts.append((START_X+1, START_Y))
-        self.orientation = (1,0)
-        self.time_step = 0.100
-        self.last_time = time.time()
-        self.remembered_tail = None
-
-        self.time_excuse = False
+        self.body_parts = copy.deepcopy(BODY)
+        self.dx = DX
+        self.dy = DY
+        self.tick_time = time.time()
         self.food = (random.randint(0,19),random.randint(0,19))
         self.food_time = time.time()
         self.food_wait_time = 15
 
+        ## NEURAL PARAMS
+        self.classes = 3
 
-    def get_fitness(self):
-        pass
+    def conv2d(x, W):
+        return tf.nn.conv2d(x, W, strides=[1,1,1,1], padding='SAME')
+
+    def maxpool2d(x):
+        return tf.nn.max_pool(x, ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')
+
+    def model(self, inner_x):
+        self.x = tf.placeholder('float',[None, 400])
+        self.y = tf.placeholder('float')
+        self.keep_rate = 0.8
+        self.keep_prob = tf.placeholder(tf.float32)
+        weights = {'W_conv1':tf.Variable(tf.random_normal([5,5,1,32])),
+                   'W_conv2':tf.Variable(tf.random_normal([5,5,32,64])),
+                   'out':tf.Variable(tf.random_normal([1024, n_classes]))}
+
+        biases = {'b_conv1':tf.Variable(tf.random_normal([32])),
+                  'b_conv2':tf.Variable(tf.random_normal([64])),
+                  'out':tf.Variable(tf.random_normal([n_classes]))}
+
+        inner_x = tf.reshape(inner_x, shape=[-1, 20, 20, 1])
+
+        conv1 = tf.nn.relu(conv2d(inner_x, weights['W_conv1']) + biases['b_conv1'])
+        conv1 = maxpool2d(conv1)
+
+        conv2 = tf.nn.relu(conv2d(conv1, weights['W_conv2']) + biases['b_conv2'])
+        conv2 = maxpool2d(conv2)
+
+        fc = tf.reshape(conv2,[-1, 7*7*64])
+        fc = tf.nn.relu(tf.matmul(fc, weights['W_fc'])+biases['b_fc'])
+        fc = tf.nn.dropout(fc, self.keep_rate)
+
+        output = tf.matmul(fc, weights['out'])+biases['out']
+
+        return output
+
+    def cost_function(self, prediction):
+        return tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits(prediction, self.y) )
+
+    def train_neural_network(self, frame_x, frame_y):
+        prediction = self.model(self.x)
+        cost = self.cost_function(prediction)
+        optimizer = tf.train.AdamOptimizer().minimize(cost)
+        
+        with tf.Session() as sess:
+            sess.run(tf.initialize_all_variables())
+            _, c = sess.run([optimizer, cost], feed_dict={x: frame_x, y: frame_y})
+            loss += c
+            print('Loss after frame : ' + str(loss))
+
+            correct = tf.equal(tf.argmax(prediction, 1), tf.argmax(y, 1))
+
+            accuracy = tf.reduce_mean(tf.cast(correct, 'float'))
+            print('Accuracy:',accuracy.eval({x:mnist.test.images, y:mnist.test.labels}))
 
     def draw(self):
         # pygame.draw.line(self.gameDisplay, black, (self.anchor_x, self.anchor_y),(self.head_x,self.head_y), 5)
@@ -55,17 +108,6 @@ class Game(object):
 
         self.gameDisplay.fill(red, (self.food[0]*STEP_SIZE, self.food[1]*STEP_SIZE, STEP_SIZE, STEP_SIZE))
 
-    def move(self):
-        print(self.body_parts)
-        self.check_food()
-        if self.check_wall():
-            return
-        for i, body_part in enumerate(self.body_parts):
-            if i == 0:
-                continue
-            else:
-                self.body_parts[i] = copy.deepcopy(self.body_parts[i-1])
-        self.body_parts[0] = (self.body_parts[0][0] + self.orientation[0], self.body_parts[0][1] + self.orientation[1])
 
     def check_wall(self):
         if self.body_parts[0][0] < 0 or self.body_parts[0][0] > MAX_X:
@@ -76,56 +118,58 @@ class Game(object):
             return True
         return False
 
-    def check_food(self):
-        if self.remembered_tail is not None and self.remembered_tail != self.body_parts[-1]:
-            print(self.remembered_tail)
-            print(self.body_parts[-1])
-            self.body_parts.append(self.remembered_tail)
-            self.body_parts = self.body_parts
-            self.remembered_tail = None
-            print(self.body_parts)
-        if self.body_parts[0][0] == self.food[0] and self.body_parts[0][1] == self.food[1]:
-            print('appending')
-            self.food = (random.randint(0,19),random.randint(0,19))
-            self.remembered_tail = self.body_parts[-1]
+    def change_orientation(self, direction):
+        if direction == 'left':
+            if self.dx != 1:
+                self.dx = -1
+                self.dy = 0
+        if direction == 'right':
+            if self.dx != -1:
+                self.dx = 1
+                self.dy = 0
+        if direction == 'up':
+            if self.dy != 1:
+                self.dy = -1
+                self.dx = 0
+        if direction == 'down':
+            if self.dy != -1:
+                self.dy = 1
+                self.dx = 0
 
+    def move(self):
+        self.body_parts.pop(0)
+        last = self.body_parts[-1]
+        self.body_parts.append((last[0]+self.dx,last[1]+self.dy))
+        new_part = self.body_parts[-1]
+        if new_part[0] < 0 or new_part[0] > MAX_X or new_part[1] < 0 or new_part[1] > MAX_Y:
+            raise Exception
+            return
+    def check_food(self):
+        head = self.body_parts[-1]
+        if head[0] == self.food[0] and head[1] == self.food[1]:
+            self.food = (random.randint(0,19),random.randint(0,19))
+            self.food_time = time.time()
 
     def tick(self):
         now = time.time()
-        if abs(self.last_time - now) > self.time_step:
-            self.last_time = now
+        if abs(self.tick_time - now) > TIME_STEP_SIZE:
+            self.tick_time = now
             self.move()
-            self.move_time()
-
-    def move_time(self):
-        time_now = time.time()
-        if abs(self.food_time - time_now) > self.food_wait_time or self.time_excuse:
-            self.food_time = time_now
-            if not self.time_excuse:
-                self.food = (random.randint(0,19),random.randint(0,19))
-            self.time_excuse = False
+            self.check_food()
 
     def start(self):
         self.end = False
         while not self.end:
             for event in pygame.event.get():
-                if event.type == pygame.KEYDOWN:
+                if event.type == pygame.KEYUP:
                     if event.key == pygame.K_LEFT:
-                        if self.orientation[0] != 1:
-                            self.orientation = (-1,0)
-                            self.time_excuse = True
+                        self.change_orientation('left')
                     if event.key == pygame.K_RIGHT:
-                        if self.orientation[0] != -1:
-                            self.orientation = (1,0)
-                            self.time_excuse = True
+                        self.change_orientation('right')
                     if event.key == pygame.K_UP:
-                        if self.orientation[1] != 1:
-                            self.orientation = (0,-1)
-                            self.time_excuse = True
+                        self.change_orientation('up')
                     if event.key == pygame.K_DOWN:
-                        if self.orientation[1] != -1:
-                            self.orientation = (0,1)
-                            self.time_excuse = True
+                        self.change_orientation('down')
                     if event.key == pygame.K_q:
                         self.end = True
                 if event.type == pygame.KEYDOWN:
