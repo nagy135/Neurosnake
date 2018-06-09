@@ -5,6 +5,7 @@ import os
 import pygame
 import math
 import random
+import numpy as np
 
 black = (0,0,0)
 white = (255,255,255)
@@ -21,7 +22,7 @@ DY = 0
 MAX_X = 19
 MAX_Y = 19
 STEP_SIZE = 50
-TIME_STEP_SIZE = 0.04
+TIME_STEP_SIZE = 0.4
 
 # os.environ['SDL_VIDEO_WINDOW_POS'] = "{},{}".format(0,0)
 
@@ -40,55 +41,72 @@ class Game(object):
         self.food_time = time.time()
         self.food_wait_time = 15
 
-        ## NEURAL PARAMS
-        self.classes = 3
-
-    def conv2d(x, W):
-        return tf.nn.conv2d(x, W, strides=[1,1,1,1], padding='SAME')
-
-    def maxpool2d(x):
-        return tf.nn.max_pool(x, ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')
-
-    def model(self, inner_x):
+        ## Neural Network variables
         self.x = tf.placeholder('float',[None, 400])
         self.y = tf.placeholder('float')
+        self.map = tf.placeholder('float',[None, 400])
+        self.classes = 4
         self.keep_rate = 0.8
         self.keep_prob = tf.placeholder(tf.float32)
-        weights = {'W_conv1':tf.Variable(tf.random_normal([5,5,1,32])),
-                   'W_conv2':tf.Variable(tf.random_normal([5,5,32,64])),
-                   'out':tf.Variable(tf.random_normal([1024, n_classes]))}
+        ##
 
-        biases = {'b_conv1':tf.Variable(tf.random_normal([32])),
-                  'b_conv2':tf.Variable(tf.random_normal([64])),
-                  'out':tf.Variable(tf.random_normal([n_classes]))}
+    def conv2d(self, x, W):
+        return tf.nn.conv2d(x, W, strides=[1,1,1,1], padding='SAME')
 
-        inner_x = tf.reshape(inner_x, shape=[-1, 20, 20, 1])
+    def maxpool2d(self, x):
+        return tf.nn.max_pool(x, ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')
 
-        conv1 = tf.nn.relu(conv2d(inner_x, weights['W_conv1']) + biases['b_conv1'])
-        conv1 = maxpool2d(conv1)
+    def fully_connected(self, x):
+        return tf.contrib.layers.fully_connected(x)
 
-        conv2 = tf.nn.relu(conv2d(conv1, weights['W_conv2']) + biases['b_conv2'])
-        conv2 = maxpool2d(conv2)
+    def model(self, inner_x):
+        n_nodes_hl1 = 100
+        n_nodes_hl2 = 100
+        n_nodes_hl3 = 100
 
-        fc = tf.reshape(conv2,[-1, 7*7*64])
-        fc = tf.nn.relu(tf.matmul(fc, weights['W_fc'])+biases['b_fc'])
-        fc = tf.nn.dropout(fc, self.keep_rate)
+        hidden_1_layer = {'weights':tf.Variable(tf.random_normal([400, n_nodes_hl1])),
+                          'biases':tf.Variable(tf.random_normal([n_nodes_hl1]))}
 
-        output = tf.matmul(fc, weights['out'])+biases['out']
+        hidden_2_layer = {'weights':tf.Variable(tf.random_normal([n_nodes_hl1, n_nodes_hl2])),
+                          'biases':tf.Variable(tf.random_normal([n_nodes_hl2]))}
+
+        hidden_3_layer = {'weights':tf.Variable(tf.random_normal([n_nodes_hl2, n_nodes_hl3])),
+                          'biases':tf.Variable(tf.random_normal([n_nodes_hl3]))}
+
+        output_layer = {'weights':tf.Variable(tf.random_normal([n_nodes_hl3, self.classes])),
+                        'biases':tf.Variable(tf.random_normal([self.classes])),}
+
+
+        l1 = tf.add(tf.matmul(inner_x, hidden_1_layer['weights']), hidden_1_layer['biases'])
+        l1 = tf.nn.relu(l1)
+
+        l2 = tf.add(tf.matmul(l1, hidden_2_layer['weights']), hidden_2_layer['biases'])
+        l2 = tf.nn.relu(l2)
+
+        l3 = tf.add(tf.matmul(l2,hidden_3_layer['weights']), hidden_3_layer['biases'])
+        l3 = tf.nn.relu(l3)
+
+        output = tf.matmul(l3,output_layer['weights']) + output_layer['biases']
 
         return output
 
-    def cost_function(self, prediction):
+    def cost_function(self, predict):
+        print('=======================================================================')
+        print(predict)
+        new_orientation = tf.argmax(predict)
+        movement = new_orientation.eval()
         return tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits(prediction, self.y) )
 
-    def train_neural_network(self, frame_x, frame_y):
+    def train_neural_network(self, frame_x):
         prediction = self.model(self.x)
-        cost = self.cost_function(prediction)
-        optimizer = tf.train.AdamOptimizer().minimize(cost)
-        
+
         with tf.Session() as sess:
-            sess.run(tf.initialize_all_variables())
-            _, c = sess.run([optimizer, cost], feed_dict={x: frame_x, y: frame_y})
+            sess.run(tf.global_variables_initializer())
+            frame_x = frame_x.reshape((1,400))
+            predict = sess.run([prediction], feed_dict={self.x: frame_x})
+            cost = self.cost_function(predict)
+            optimizer = tf.train.AdamOptimizer().minimize(cost)
+            _, c = sess.run([optimizer, cost], feed_dict={prediction: predict})
             loss += c
             print('Loss after frame : ' + str(loss))
 
@@ -97,26 +115,21 @@ class Game(object):
             accuracy = tf.reduce_mean(tf.cast(correct, 'float'))
             print('Accuracy:',accuracy.eval({x:mnist.test.images, y:mnist.test.labels}))
 
+    def train(self):
+        frame_x = self.create_map()
+        self.train_neural_network(frame_x)
+
+    def create_map(self):
+        arr = np.zeros((MAX_Y+1, MAX_X+1))
+        for bodypart in self.body_parts:
+            arr[bodypart[1]][bodypart[0]] = 1
+        arr[self.body_parts[-1][1]][self.body_parts[-1][0]] = 2
+        return arr
+
     def draw(self):
-        # pygame.draw.line(self.gameDisplay, black, (self.anchor_x, self.anchor_y),(self.head_x,self.head_y), 5)
-        # pygame.draw.circle(self.gameDisplay, black, (int(self.head_x),int(self.head_y)), BALANCER_HEAD_RADIUS)
-        # pygame.draw.circle(self.gameDisplay, red, (int(self.ball_x),int(self.ball_y)), BALL_RADIUS)
-        # pygame.draw.line(self.gameDisplay, black, (self.ball_x-pri, self.ball_y+pro),(self.ball_x, self.ball_y), 5)
         for body_part in self.body_parts:
-            # pygame.draw.rect(self.gameDisplay, black, (STEP_SIZE*body_part[0], STEP_SIZE*body_part[1], STEP_SIZE, STEP_SIZE), 100)
             self.gameDisplay.fill(black, (STEP_SIZE*body_part[0], STEP_SIZE*body_part[1], STEP_SIZE, STEP_SIZE))
-
         self.gameDisplay.fill(red, (self.food[0]*STEP_SIZE, self.food[1]*STEP_SIZE, STEP_SIZE, STEP_SIZE))
-
-
-    def check_wall(self):
-        if self.body_parts[0][0] < 0 or self.body_parts[0][0] > MAX_X:
-            self.end = True
-            return True
-        if self.body_parts[0][1] < 0 or self.body_parts[0][1] > MAX_Y:
-            self.end = True
-            return True
-        return False
 
     def change_orientation(self, direction):
         if direction == 'left':
@@ -170,6 +183,8 @@ class Game(object):
                         self.change_orientation('up')
                     if event.key == pygame.K_DOWN:
                         self.change_orientation('down')
+                    if event.key == pygame.K_m:
+                        self.train()
                     if event.key == pygame.K_q:
                         self.end = True
                 if event.type == pygame.KEYDOWN:
