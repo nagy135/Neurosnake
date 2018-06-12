@@ -48,6 +48,7 @@ class Game(object):
         self.classes = 4
         self.keep_rate = 0.8
         self.keep_prob = tf.placeholder(tf.float32)
+        self.training = False
         ##
 
     def conv2d(self, x, W):
@@ -64,17 +65,17 @@ class Game(object):
         n_nodes_hl2 = 100
         n_nodes_hl3 = 100
 
-        hidden_1_layer = {'weights':tf.Variable(tf.random_normal([400, n_nodes_hl1])),
-                          'biases':tf.Variable(tf.random_normal([n_nodes_hl1]))}
+        hidden_1_layer = {'weights':tf.Variable(tf.random_normal([400, n_nodes_hl1]), name="layer1_weights"),
+                          'biases':tf.Variable(tf.random_normal([n_nodes_hl1]), name="layer1_biases")}
 
-        hidden_2_layer = {'weights':tf.Variable(tf.random_normal([n_nodes_hl1, n_nodes_hl2])),
-                          'biases':tf.Variable(tf.random_normal([n_nodes_hl2]))}
+        hidden_2_layer = {'weights':tf.Variable(tf.random_normal([n_nodes_hl1, n_nodes_hl2]), name="layer2_weights"),
+                          'biases':tf.Variable(tf.random_normal([n_nodes_hl2]), name="layer2_biases")}
 
-        hidden_3_layer = {'weights':tf.Variable(tf.random_normal([n_nodes_hl2, n_nodes_hl3])),
-                          'biases':tf.Variable(tf.random_normal([n_nodes_hl3]))}
+        hidden_3_layer = {'weights':tf.Variable(tf.random_normal([n_nodes_hl2, n_nodes_hl3]), name="layer3_weights"),
+                          'biases':tf.Variable(tf.random_normal([n_nodes_hl3]), name="layer3_biases")}
 
-        output_layer = {'weights':tf.Variable(tf.random_normal([n_nodes_hl3, self.classes])),
-                        'biases':tf.Variable(tf.random_normal([self.classes])),}
+        output_layer = {'weights':tf.Variable(tf.random_normal([n_nodes_hl3, self.classes]), name="out_weights"),
+                        'biases':tf.Variable(tf.random_normal([self.classes]), name="out_biases")}
 
 
         l1 = tf.add(tf.matmul(inner_x, hidden_1_layer['weights']), hidden_1_layer['biases'])
@@ -93,29 +94,60 @@ class Game(object):
     def cost_function(self, predict):
         print('=======================================================================')
         print(predict)
-        new_orientation = tf.argmax(predict)
-        movement = new_orientation.eval()
+        #[1,0,0,0] = Up
+        #[0,1,0,0] = Right
+        #[0,0,1,0] = Down
+        #[0,0,0,1] = Left
         return tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits(prediction, self.y) )
+
+    def outside_cost(self):
+        #TODO create [0, 0, 0, 1] and return it
+        return np.array([0, 0, 0, 1])
 
     def train_neural_network(self, frame_x):
         prediction = self.model(self.x)
+        
+        cost = tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=prediction)
 
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
             frame_x = frame_x.reshape((1,400))
             predict = sess.run([prediction], feed_dict={self.x: frame_x})
-            cost = self.cost_function(predict)
+
+            ## PERFORM MOVE
+            new_orientation = np.argmax(predict)
+            if new_orientation == 0:
+                self.change_orientation('up')
+            elif new_orientation == 1:
+                self.change_orientation('right')
+            elif new_orientation == 2:
+                self.change_orientation('down')
+            elif new_orientation == 3:
+                self.change_orientation('left')
+            self.move()
+
+            print('==================================')
+            variables = tf.trainable_variables()
+            for var in variables:
+                print(var)
+            print('==================================')
+
             optimizer = tf.train.AdamOptimizer().minimize(cost)
             _, c = sess.run([optimizer, cost], feed_dict={prediction: predict})
-            loss += c
-            print('Loss after frame : ' + str(loss))
+            print("Loss : {}".format(str(c)))
+            # correct = tf.equal(tf.argmax(prediction, 1), tf.argmax(y, 1))
 
-            correct = tf.equal(tf.argmax(prediction, 1), tf.argmax(y, 1))
-
-            accuracy = tf.reduce_mean(tf.cast(correct, 'float'))
-            print('Accuracy:',accuracy.eval({x:mnist.test.images, y:mnist.test.labels}))
+            # accuracy = tf.reduce_mean(tf.cast(correct, 'float'))
+            # print('Accuracy:',accuracy.eval({x:mnist.test.images, y:mnist.test.labels}))
 
     def train(self):
+        self.training = not self.training
+        if self.training:
+            print("Training begins")
+        else:
+            print("Training ends")
+
+    def train_tick(self):
         frame_x = self.create_map()
         self.train_neural_network(frame_x)
 
@@ -167,8 +199,10 @@ class Game(object):
         now = time.time()
         if abs(self.tick_time - now) > TIME_STEP_SIZE:
             self.tick_time = now
-            self.move()
-            self.check_food()
+            # self.move()
+            # self.check_food()
+            if self.training:
+                self.train_tick()
 
     def start(self):
         self.end = False
